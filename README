@@ -1,0 +1,23 @@
+Checkpkg
+
+Usage: testpkg [options] <package_filename>
+
+Testpkg is used to test a .t{gz,bz,lz,xz} package to see if your Slackware system 
+has the required dependencies. Testpkg may also be able to install any required 
+packages. Any required packages or libraries missing from your system will be 
+listed when the test completes. Testpkg can be used like this:
+    testpkg -i n /path/to/gimp-2.6.11-x86_64-1.txz
+    
+options:    -i, --install-required y|n (Install available required packages,
+                                        prompts user if not set)
+            -v, --version              (Prints $SCR_NAME version)
+            -h, --help                 (Prints this message)
+
+Testpkg is an experimental script, it is currently in testing, some bugs are to be expected. The current version of this script is 20120702, once more testing has taken place and I am happy with the scripts performance I'll change the version from a date format to a proper versioning system. If you experience any unexpected behaviour or have feedback of any kind please don't hesitate to contact the author/maintaner of this script.
+
+Note: Testpkg is in no way affiliated with or supported by Slackware Linux, please don't bother the Slackware team with your enquiries. 
+
+Requirements: Slackpkg gets used to identify any required libraries (if they belong to offical slackware packages) and also used to retrieve any required packages that are a part of the slackware main tree. To obtain full functionality of this script you must have slackpkg installed on your system. How-ever the script still has basic functionality without slackpkg. 
+
+Luke Williams
+xocel@iquidus.org 

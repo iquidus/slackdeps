@@ -1,0 +1,528 @@
+#!/bin/bash
+
+# Testpkg
+
+## Copyright 2012 Luke Williams, xocel@iquidus.org
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Repo: https://github.com/iquidus/testpkg
+
+SCR_NAME=$(basename $0)     # Name of this script
+VERSION=20120629   			# Current version of this script
+
+PKG_LOG="/var/log/packages" # Package logs
+LDD_MIN="2.13"				# Minimum ldd version supported/tested
+TAR_MIN="1.26"		        # Minimum tar version supported/tested
+SLACKPKG_MIN="2.81.1"	    # Minimum lackpkg version supported/tested
+TEMP_PREFIX="/tmp"          # temporary directory prefix
+
+## Configure blacklist
+# PKG_BLACKLIST contains blacklisted package names. Add any packages to the 
+# blacklist that you would like ignored.
+PKG_BLACKLIST=( 'util-linux' 'aaa_elflibs' 'tor_browser_bundle') 
+##PKG_BLACKLIST=()
+
+# LIB_BLACKLIST contains blacklisted libraries. Add any libraries to the blacklist
+# you would like ignored. It is recommended having atleast 'linux-vdso.so.1' in 
+# one of the array elements to avoid it showing as a missing lib. ( It's a Virtual 
+# Dynamically Shared Object and part of the kernel) so theres no need to worry about it :) 
+LIB_BLACKLIST=( 'linux-vdso.so.1' 'libuuid.so.1')
+
+## Mozilla fix
+# Fixes false positives returning on mozilla packages
+# E.g Firefox requiring seamonkey and mozilla-thunderbird
+LIB_BLACKLIST=( "${LIB_BLACKLIST[@]}" "libprldap60.so" "libldap60.so" "libldif60.so" "libmozjs.so")
+
+## Error codes
+# If checkpkg encounters a problem, it will return a non-zero error code.
+# 1 = tar returned error code
+# 2 = ldd returned error code
+# 3 = unrecognized extension
+# 4 = no such file
+# 5 = external compression utility missing
+# 6 = missing/unsupported ldd
+# 99 = invalid arguments
+
+function usage {
+	# Print usage
+	cat << EOF
+
+Usage: testpkg [options] <package_filename>
+
+Testpkg is used to test a .t{gz,bz,lz,xz} package to see if your system 
+has the required dependencies. Testpkg may also be able to install any required 
+packages. Any required packages or libraries missing from your system will be 
+listed when the test completes. Testpkg can be used like this:
+    testpkg -i n /path/to/gimp-2.6.11-x86_64-1.txz
+    
+options:    -i, --install-required y|n (Install available required packages,
+                                        prompts user if not set)
+            -v, --version              (Prints $SCR_NAME version)
+            -h, --help                 (Prints this message)
+
+EOF
+}
+
+packageName () {
+	# Accepts long/full package name.
+	# E.g gimp-2.6.11-x86_64-1.txz or gimp-2.6.11-x86_64-1
+	# Echo's shortname e.g gimp
+	# Handles names with hyphons, e.g xine-lib-1.1.19-x86_64-2 returns xine-lib 
+	PKG=($(echo $1 | tr "-" "\n"))
+	PKG_NAME=${PKG[0]}
+	if [ ${#PKG[@]} -gt 4 ]; then
+		# Name most likely contains one or more '-'
+		# So put it back together	
+		ENDLOOP=$((${#PKG[@]} - 3))
+		COUNT=1
+		while [ $COUNT -lt $ENDLOOP ]; do
+			PKG_NAME="$PKG_NAME-${PKG[$COUNT]}"
+			COUNT=$(($COUNT + 1))
+		done
+	fi
+	echo $PKG_NAME
+}
+
+packageVersion () {
+	# Accepts long/full package name.
+	# E.g gimp-2.6.11-x86_64-1.txz or gimp-2.6.11-x86_64-1
+	# Echo's package version e.g 2.6.11
+	PKG=($(echo $1 | tr "-" "\n"))
+	echo $(echo $1 | cut -f $((${#PKG[@]}-2)) -d '-')
+}
+
+packageArch () {
+	# Accepts long/full package name.
+	# E.g gimp-2.6.11-x86_64-1.txz or gimp-2.6.11-x86_64-1
+	# Echo's package arch e.g x84_64
+	PKG=($(echo $1 | tr "-" "\n"))
+	echo $(echo $1 | cut -f $((${#PKG[@]}-1)) -d '-')
+}
+
+packageBuild () {
+	# Accepts long package name. (no extension)
+	# E.g gimp-2.6.11-x86_64-1
+	# Echo's package build e.g 1
+	PKG=($(echo $1 | tr "-" "\n"))
+	echo "$(echo $1 | cut -f ${#PKG[@]} -d '-')"	
+}
+
+#Check arguments
+
+INSTALL_REQUIRED="0"
+TEST_PKG=''
+while [ 0 ]; do
+	if [ "$1" == "-h" -o "$1" == "--help" ]; then
+		usage
+		exit 0
+	elif [ "$1" == "--version" -o "$1" == "-v" ]; then
+		echo "$VERSION"
+		exit 0
+	elif [ "$1" == "--install" -o "$1" == "-i" ]; then
+		if [ "$2" == "y" ]; then
+			INSTALL_REQUIRED=y
+		elif [ "$2" == "n" ]; then
+			INSTALL_REQUIRED=n
+		else
+			usage
+			exit 99
+		fi
+		shift 2
+	elif [ -e "$1" ]; then
+			TEST_PKG="$1"
+			shift 1
+		else
+		break
+	fi
+done
+
+#VERIFY PACKAGE
+if [ -z $TEST_PKG ]; then
+	usage
+	exit 4
+fi
+
+# Break package up into seperate parts; path, name, ver, arch, build, extension etc
+declare -A PACKAGE
+PACKAGE[path]=$(realpath $TEST_PKG)
+PACKAGE[fullname]=$(basename "${PACKAGE[path]}")
+PACKAGE[extension]=$(echo "${PACKAGE[fullname]}" | rev | cut -f 1 -d . | rev)
+PACKAGE[longname]=$(basename ${PACKAGE[fullname]} ".${PACKAGE[extension]}")
+PACKAGE[shortname]=$(packageName ${PACKAGE[fullname]})
+PACKAGE[version]=$(packageVersion ${PACKAGE[fullname]})
+PACKAGE[arch]=$(packageArch ${PACKAGE[fullname]})
+PACKAGE[build]=$(packageBuild ${PACKAGE[longname]}) 
+
+echo "$SCR_NAME ($VERSION)"
+echo "Testing ${PACKAGE[path]}"
+echo ""
+
+# Check ldd is present
+ldd --help > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+	echo "external utility 'ldd' is missing"
+	exit 6
+fi
+
+# Check ldd version
+LDD_VER=$(ldd --version | head -n 1 | cut -f 4 -d " ")
+if [ $LDD_VER \< $LDD_MIN ]; then
+	echo "$SCR_NAME may be unstable with ldd < $LDD_MIN"
+	sleep 5
+fi
+
+# Check tar is present
+tar --help > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+	echo "external utility 'tar' is missing"
+	exit 5
+fi
+
+# Check tar version
+TAR_VER=$(tar --version | head -n 1 | cut -f 4 -d " ")
+if [  $TAR_VER \< $TAR_MIN ]; then
+	echo "$SCR_NAME may be unstable with tar < $TAR_MIN."
+	sleep 5
+fi
+
+# Check slackpkg is present
+SLACKPKG_EXISTS=n 
+/usr/sbin/slackpkg > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+	SLACKPKG_EXISTS=y
+else
+	echo "'slackpkg' is missing, for full functionality install slackpkg"
+	sleep 5
+fi
+
+# Check slackpkg version
+if [ "$SLACKPKG_EXISTS" == "y" ]; then
+	SLACKPKG_VER="$(/usr/sbin/slackpkg | head -n 1 | cut -f 4 -d ' ')"
+	if [  $SLACKPKG_VER \< $SLACKPKG_MIN ]; then
+		echo "$SCR_NAME may be unstable with slackpkg < $SLACKPKG_MIN."
+		sleep 5
+	fi
+fi
+
+# Current working directory
+CWD=$(pwd) 
+
+# Create temporary directory
+TEMP_DIR=$(mktemp -d $TEMP_PREFIX/$SCR_NAME.XXXXXX)
+
+# Extract contents of package to temp_dir
+# No need to extract whole package if install/slack-required exists.
+# So attempt that first.
+CWD=$TEMP_DIR
+cd $CWD
+echo "Attempting to extract ${PACKAGE[path]}"
+tar -xf ${PACKAGE[path]}  > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+	echo "Unable to extract package: ${PACKAGE[path]}"
+	exit 1
+else
+	echo "Extracted ${PACKAGE[path]} to $TEMP_DIR"
+fi
+
+# Add package to blacklist to prevent it from returning itself as a requirement (if its installed)
+PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" "${PACKAGE[shortname]}" )
+
+
+echo "Determining dependencies, this may take a while.."
+MULTILIB=0
+LIBRARIES=()
+PACKAGES=()
+
+# Check for slack required for required 3rd party packages 
+if [ -e "$TEMP_DIR/install/slack-required" ]; then
+	# Read packages from slack-required.
+	#REQUIRED_CAT=( $( cat install/slack-required ) )
+	while read LINE; do
+		PKG_FORMAT=($(echo $LINE | tr '-' '\n'))
+		if [ "${#PKG_FORMAT}" -gt 1 ]; then
+			PACKAGES=("${PACKAGES[@]}" "$(packageName $LINE)")
+		else
+			PACKAGES=("${PACKAGES[@]}" "$LINE")
+		fi
+	done < "$TEMP_DIR/install/slack-required"
+fi
+
+findPackage() {
+	PKGS=($(grep $1 $PKG_LOG/*))
+	for LINE in "${PKGS[@]}"; do
+		if [ ! -z $LINE ]; then
+			PKG="$(echo "$LINE" | cut -f 1 -d :)"
+			if [ -z $PKG ]; then
+				continue
+			fi
+			PKG=$(basename $PKG)
+			BLACKLISTED=0
+			for i in "${PKG_BLACKLIST[@]}"; do 
+				if [ "$(packageName $PKG)" == "$i" ]; then
+					BLACKLISTED=1
+				fi
+			done
+			if [ $MULTILIB -eq 0 ]; then
+				echo $PKG | grep "\-compat32" > /dev/null 2>&1
+				if [ "$?" -eq 0 ]; then
+						continue
+				fi				
+			fi
+			if [ $BLACKLISTED -eq 0 ]; then
+				#echo "$PKG : $1"
+				PACKAGES=("${PACKAGES[@]}" "$PKG")
+				return 0
+			fi
+
+		fi
+	done
+	return 1
+}
+
+declare -A PKG_DATA
+
+# Will need to determine dependencies using ldd
+# Attempt that now
+for BIN in $(grep -r -m 1 "^" $CWD | grep "^Binary file" | sed -r 's:^Binary\sfile\s(.*)\smatches:\1:g'); do
+	if [ -e $BIN ]; then    
+	    while read LINE; do
+			LIB="$(echo "$LINE" | cut -f 1 -d ' ' | sed 's/^\t*//g')"
+			LIB=$(basename $LIB)
+			if [ $LIB != "not" ]; then
+				LIBRARIES=("${LIBRARIES[@]}" "$LIB")
+			fi
+		done <<< "$(ldd $BIN)"
+	fi
+done
+
+# Remove duplicates and blacklisted libraries
+LIBRARIES=($(echo ${LIBRARIES[@]} | tr " " "\n" | sort -u))
+for i in "${LIB_BLACKLIST[@]}"; do
+	LIBRARIES=(${LIBRARIES[@]//*$i*})
+done
+
+# If possible, find which packages contain the required libraries
+for x in "${LIBRARIES[@]}"; do
+	# Remove libraries that are symlinks created after package install
+	if [ -e "install/doinst.sh" ]; then
+		grep $x "install/doinst.sh" > /dev/null 2>&1
+		if [ "$?" -eq 0 ]; then
+			LIBRARIES=(${LIBRARIES[@]//*$x*/})
+			continue
+		fi
+	fi
+	# Remove libraries included in package
+	LIB_PATH="$(find $CWD -name "${x}")"
+	if [ ! -z $LIB_PATH ]; then 
+		LIBRARIES=(${LIBRARIES[@]//*$x*/})
+	else
+		findPackage $x
+		if [ "$?" -eq 0 ]; then
+			LIBRARIES=(${LIBRARIES[@]//*$x*/})
+		fi
+	fi
+done
+
+# Unidentified libraries may be a result of being created after install, e.g symlinks
+# Resolve symlinks
+for x in "${LIBRARIES[@]}"; do
+	L=$(find / -name $x -ignore_readdir_race | head -n 1)
+	if [ -L $L ] && [ ! -z $L ]; then
+		xreal=$(basename $(realpath $L))
+		findPackage $xreal
+		if [ "$?" -eq 0 ]; then
+			LIBRARIES=(${LIBRARIES[@]//*$x*/})
+		fi
+	fi 
+done
+
+# Remove duplicate entries
+PACKAGES=($(echo ${PACKAGES[@]} | tr " " "\n" | sort -u))
+for i in "${PACKAGES[@]}"; do
+	PKG_DATA[$(packageName $i)]="$(basename $(packageVersion $i) _multilib)"
+done
+
+
+COUNT_FAIL=0
+COUNT_WARN=0
+REQUIRED_PACKAGES=()
+
+echo ""
+printf "%-30s %-40s\n" "[Required Package]" "[System status]"
+echo ""
+for EACH in "${!PKG_DATA[@]}"; do
+	INSTALLED=0
+	while read BLAH; do
+		if [ ! -z "$BLAH" ]; then
+			INST=$(basename $BLAH)
+			INST_NAME=$(packageName $INST)
+			INST_VER=$(packageVersion $INST)
+		
+			if [ "$INST_NAME" == "$EACH" ]; then
+				INSTALLED=1
+				printf "%-30s \e[32m%-40s\e[00m\n" "$EACH" "INSTALLED: $INST"
+			fi
+		fi 
+	done <<< "$(find $PKG_LOG -name $EACH*)"
+	if [ $INSTALLED -eq 0 ]; then
+		printf "%-30s \e[31m%-40s\e[00m\n" "$EACH" "NOT FOUND"
+		COUNT_FAIL=$(($COUNT_FAIL + 1))
+		REQUIRED_PACKAGES=("${REQUIRED_PACKAGES[@]}" "$EACH")
+	fi
+done
+
+if [ ${#LIBRARIES[@]} -gt 0 ]; then
+	echo ""
+	echo "${#LIBRARIES[@]} libraries were unable to be indentified"
+	echo "Maybe they were installed manually e.g or strait from source"
+	echo "Checking your system now.."
+	echo ""
+	for EACH in ${LIBRARIES[@]}; do
+		EXISTS=($(find /lib* /usr -name $EACH -ignore_readdir_race))
+		LOCATION=''
+		if [ ${#EXISTS} -gt 0 ]; then
+			LOC_COUNT=0
+			for i in "${EXISTS[@]}"; do
+				if [ ! -z $i ] && [ "$LOC_COUNT" -lt 2 ]; then
+					LOCATION="$LOCATION$i "
+					LOC_COUNT=$(($LOC_COUNT + 1))
+				fi
+			done
+			printf "%-30s \e[32m%-40s\e[00m\n" "$EACH" "[FOUND: $LOCATION]"
+			LIBRARIES=(${LIBRARIES[@]//*$EACH*/})
+		else
+			printf "%-30s \e[31m%-40s\e[00m\n" "$EACH" "[NOT FOUND ON SYSTEM]"
+			COUNT_FAIL=$(($COUNT_FAIL + 1))
+		fi
+	done
+fi
+
+IFS=$'\n'
+OLDIFS=$IFS
+if [ ${#LIBRARIES[@]} -gt 0 ]; then
+	if [ -e "/usr/sbin/slackpkg" ] ; then
+		echo ""
+		echo "Going to attempt to identify the remaining ${#LIBRARIES[@]} libraries using slackpkg" 
+		echo "Searching now.."
+		echo ""
+		for EACH in "${LIBRARIES[@]}"; do
+			SLACKPKG_OUT=($(/usr/sbin/slackpkg file-search "$EACH"))
+			if [ $(echo "${SLACKPKG_OUT[@]}" | grep -c "No packages contains") -ne 0 ]; then
+				printf "%-30s \e[31m%-40s\e[00m\n" "$EACH" "UNAVAILABLE"
+				continue
+			else
+				for SLACKPKG in "${SLACKPKG_OUT[@]}"; do
+					if [[ "$SLACKPKG" == *"[uninstalled]"* ]]; then
+						printf "%-30s \e[32m%-40s\e[00m\n" "$EACH" "$(echo $SLACKPKG | cut -f 3 -d ' ')"
+						LIBRARIES=(${LIBRARIES[@]//*$EACH*/})
+						REQUIRED_PACKAGES=( "${REQUIRED_PACKAGES[@]}" $(echo $SLACKPKG | cut -f 3 -d ' '))
+					fi
+				done
+			fi
+		done
+		
+	fi
+fi
+if [ "${#REQUIRED_PACKAGES[@]}" -gt 0 ]; then
+	echo ""
+	echo "Checking availability of ${#REQUIRED_PACKAGES[@]} packages using slackpkg" 
+	echo "Checking now.."
+	echo ""
+	AVAILABLE_PACKAGES=()
+	for x in "${REQUIRED_PACKAGES[@]}"; do
+		SLACKPKG_OUT=($(/usr/sbin/slackpkg search "$x"))
+		if [ $(echo "${SLACKPKG_OUT[@]}" | grep -c "No package name matches") -ne 0 ]; then
+			printf "%-30s \e[31m%-40s\e[00m\n" "$x" "UNAVAILABLE"
+			continue
+		else
+			for SLACKPKG in "${SLACKPKG_OUT[@]}"; do
+				if [[ "$SLACKPKG" == *"[uninstalled]"* ]]; then
+					printf "%-30s \e[32m%-40s\e[00m\n" "$x" "AVAILABLE"
+					AVAILABLE_PACKAGES=("${AVAILABLE_PACKAGES[@]}" "$x")
+				fi
+			done
+		fi
+	done
+fi
+IFS=$OLDIFS
+echo ""
+if [ $COUNT_FAIL -gt 0 ]; then
+	if [ "${#AVAILABLE_PACKAGES[@]}" -gt 0 ]; then
+		if [ "$INSTALL_REQUIRED" == "0" ]; then
+			# Prompt user
+			echo ""
+			echo "Would you like to try install these now using slackpkg? (y|n)"
+			read INSTALL_REQUIRED
+		fi
+		if [ "$INSTALL_REQUIRED" == 'y' ]; then
+			# Check if packages exist before trying to install
+	
+
+			echo "Launching slackpkg"
+			sleep 3 
+			/usr/sbin/slackpkg install "${AVAILABLE_PACKAGES[@]}"
+			echo "Slackpkg Complete"
+			echo "-----------------"
+			printf "%-30s %-40s\n" "[Package]" "[Status]"
+			echo ""
+			for i in "${AVAILABLE_PACKAGES[@]}"; do
+				if [ -e "$PKG_LOG/$i" ]; then
+					printf "%-30s\e[32m%-40s\e[00m\n" "$i" "INSTALLED"
+					REQUIRED_PACKAGES=(${REQUIRED_PACKAGES[@]//*$i*/})
+					COUNT_FAIL=$(($COUNT_FAIL - 1))
+				else 
+					printf "%-30s\e[31m%-40s\e[00m\n" "$i" "NOT FOUND"
+				fi
+			done
+			echo ""
+		fi
+	fi
+
+fi
+
+echo "[Test Completed - ${PACKAGE[longname]}]"
+echo ""
+if [ $COUNT_WARN -gt 0 ]; then 
+	echo "WARNING: $COUNT_WARN packages do not meet the recommended minimum version requirements"
+	echo "   It is highly recommended you upgrade these packages it avoid any potential unstablity"
+fi
+
+if [ $COUNT_WARN -eq 0 ] && [ $COUNT_FAIL -eq 0 ]; then
+	echo "All requirements for ${PACKAGE[longname]} are met."
+else
+	echo "Your system is missing the following requirements"
+	echo ""
+	if [ "${#REQUIRED_PACKAGES[@]}" -gt 0 ]; then
+		echo "[${#REQUIRED_PACKAGES[@]} Required Packages]"
+		echo ""
+		for i in "${REQUIRED_PACKAGES[@]}"; do
+			echo $i
+		done
+	fi
+	if [ "${#LIBRARIES[@]}" -gt 0 ]; then
+		echo "[${#LIBRARIES[@]} Unidentified Libraries]"
+		echo ""
+		for i in "${LIBRARIES[@]}"; do
+			echo $i
+		done
+	fi
+fi
+# Clean up
+rm -rf $TEMP_DIR
