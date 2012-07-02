@@ -25,7 +25,7 @@
 # Repo: https://github.com/iquidus/testpkg
 
 SCR_NAME=$(basename $0)     # Name of this script
-VERSION=20120629   			# Current version of this script
+VERSION=20120702 			# Current version of this script
 
 PKG_LOG="/var/log/packages" # Package logs
 LDD_MIN="2.13"				# Minimum ldd version supported/tested

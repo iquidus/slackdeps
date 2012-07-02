@@ -1,4 +1,4 @@
-Checkpkg
+Testpkg
 
 Usage: testpkg [options] <package_filename>
 
@@ -19,5 +19,8 @@ Note: Testpkg is in no way affiliated with or supported by Slackware Linux, plea
 
 Requirements: Slackpkg gets used to identify any required libraries (if they belong to offical slackware packages) and also used to retrieve any required packages that are a part of the slackware main tree. To obtain full functionality of this script you must have slackpkg installed on your system. How-ever the script still has basic functionality without slackpkg. 
 
+TODO: Script dependency support (perl, python, javascript etc)
+	  Proper Multilub Detection/Support
+	  
 Luke Williams
 xocel@iquidus.org 
