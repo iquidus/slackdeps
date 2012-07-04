@@ -24,8 +24,16 @@
 
 # Repo: https://github.com/iquidus/testpkg
 
+## Changes in version 20120704 (xocel)
+# * Added -m & --multilib options to set multilib to y or n.
+# If unset the value will be automatically determined, set to y if
+# testing a 32bit package on a 64bit system. Otherwise set to n. 
+# * Added Multilib support. Now when testing 32bit packages on 64bit
+# system compat32 packages will be listed as requirements instead of
+# the stock x86_64 packages.
+
 SCR_NAME=$(basename $0)     # Name of this script
-VERSION=20120702 			# Current version of this script
+VERSION=20120704 			# Current version of this script
 
 PKG_LOG="/var/log/packages" # Package logs
 LDD_MIN="2.13"				# Minimum ldd version supported/tested
@@ -36,14 +44,21 @@ TEMP_PREFIX="/tmp"          # temporary directory prefix
 ## Configure blacklist
 # PKG_BLACKLIST contains blacklisted package names. Add any packages to the 
 # blacklist that you would like ignored.
-PKG_BLACKLIST=( 'util-linux' 'aaa_elflibs' 'tor_browser_bundle') 
+PKG_BLACKLIST=( 'util-linux' 'aaa_elflibs') 
 ##PKG_BLACKLIST=()
+
+## Tor Browser Bundle fix
+# TBB is a stand alone package and contains many common libraries
+# to avoid it appearing as a requirement (anything that requires libz for example) 
+# if installed your system, make sure its blacklisted.
+PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" "tor_browser_bundle" )
 
 # LIB_BLACKLIST contains blacklisted libraries. Add any libraries to the blacklist
 # you would like ignored. It is recommended having atleast 'linux-vdso.so.1' in 
 # one of the array elements to avoid it showing as a missing lib. ( It's a Virtual 
 # Dynamically Shared Object and part of the kernel) so theres no need to worry about it :) 
-LIB_BLACKLIST=( 'linux-vdso.so.1' 'libuuid.so.1')
+# As well as linux-gate.so.1
+LIB_BLACKLIST=( 'linux-vdso.so.1' 'libuuid.so.1' 'linux-gate.so.1' )
 
 ## Mozilla fix
 # Fixes false positives returning on mozilla packages
@@ -58,7 +73,9 @@ LIB_BLACKLIST=( "${LIB_BLACKLIST[@]}" "libprldap60.so" "libldap60.so" "libldif60
 # 4 = no such file
 # 5 = external compression utility missing
 # 6 = missing/unsupported ldd
+# 7 = incorrect architecture
 # 99 = invalid arguments
+# 
 
 function usage {
 	# Print usage
@@ -67,15 +84,18 @@ function usage {
 Usage: testpkg [options] <package_filename>
 
 Testpkg is used to test a .t{gz,bz,lz,xz} package to see if your system 
-has the required dependencies. Testpkg may also be able to install any required 
-packages. Any required packages or libraries missing from your system will be 
-listed when the test completes. Testpkg can be used like this:
+has the required dependencies. Testpkg can also install any required 
+packages if they are available via slackpkg. Any required packages or 
+libraries missing from your system will be listed when the test completes. 
+Testpkg can be used like this:
     testpkg -i n /path/to/gimp-2.6.11-x86_64-1.txz
     
-options:    -i, --install-required y|n (Install available required packages,
+options:    -i, --install-available y|n (Install available required packages,
                                         prompts user if not set)
-            -v, --version              (Prints $SCR_NAME version)
-            -h, --help                 (Prints this message)
+            -m, --multilib y|n          (Sets multilib to y or n,
+                                        Auto-determined if not set)
+            -v, --version               (Prints $SCR_NAME version)
+            -h, --help                  (Prints this message)
 
 EOF
 }
@@ -124,9 +144,9 @@ packageBuild () {
 	echo "$(echo $1 | cut -f ${#PKG[@]} -d '-')"	
 }
 
-#Check arguments
-
+# Check arguments
 INSTALL_REQUIRED="0"
+MULTILIB="0"
 TEST_PKG=''
 while [ 0 ]; do
 	if [ "$1" == "-h" -o "$1" == "--help" ]; then
@@ -135,7 +155,17 @@ while [ 0 ]; do
 	elif [ "$1" == "--version" -o "$1" == "-v" ]; then
 		echo "$VERSION"
 		exit 0
-	elif [ "$1" == "--install" -o "$1" == "-i" ]; then
+	elif [ "$1" == "--multilib" -o "$1" == "-m" ]; then
+		if [ "$2" == "y" ]; then
+			MULTILIB="y"
+		elif [ "$2" == "n" ]; then
+			MULTILIB="n"
+		else
+			usage
+			exit 99
+		fi
+		shift 2
+	elif [ "$1" == "--install-available" -o "$1" == "-i" ]; then
 		if [ "$2" == "y" ]; then
 			INSTALL_REQUIRED=y
 		elif [ "$2" == "n" ]; then
@@ -172,6 +202,53 @@ PACKAGE[build]=$(packageBuild ${PACKAGE[longname]})
 
 echo "$SCR_NAME ($VERSION)"
 echo "Testing ${PACKAGE[path]}"
+
+# If --multilib is not set, determine whether MULTILIB should be set
+if [ $MULTILIB == "0" ]; then 
+	# Determine system arch
+	ARCH=''
+  	case "$( uname -m )" in
+    	i?86) 
+			ARCH=i486 
+			;;
+    	arm*) 
+			ARCH=arm 
+			;;
+    # use uname -m for all other archs:
+       *) ARCH=$( uname -m ) ;;
+  	esac
+
+  	if [ "$ARCH" == "x86_64" ] && [ "${PACKAGE[arch]}" == "i486" ]; then
+  		MULTILIB="y"
+  	else
+  		MULTILIB="n"
+  	fi
+fi
+
+if [ $MULTILIB == "y" ]; then
+	# check core multilib packages exists
+	CORE_PKGS=( $(find $PKG_LOG -name *_multilib*) )
+	if [ ${#CORE_PKGS[@]} -ne 12 ]; then # 12 is a mysterious number ;P
+										 # Will mostly likey need to change this in the future. 
+		echo "WARNING: Multilib core packages are missing"
+		echo "Multilib: FALSE"
+		if ["${PACKAGE[arch]}" == "i486" ] && [ "$ARCH" == "x86_64" ]; then
+			echo "You need to install multilib packages to run 32bit packages on an x86_64"
+			echo "This package will not run on this system, no further information can be" 
+			echo "aquired until you have installed all the multilib packages"
+			exit 7
+		fi
+		MULTILIB="n"
+	else
+		echo "Multilib: TRUE"
+		# Blacklist 64bit packages that have multilib versions installed.
+	  	# This process is assuming all multilib packages are installed for a stable multilib system. 
+	  	for i in $(find $PKG_LOG -name *-compat32*); do
+	  		PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" $(basename $(packageName $(basename $i)) "-compat32"))
+	  	done
+  	fi
+fi
+
 echo ""
 
 # Check ldd is present
@@ -246,7 +323,7 @@ PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" "${PACKAGE[shortname]}" )
 
 
 echo "Determining dependencies, this may take a while.."
-MULTILIB=0
+
 LIBRARIES=()
 PACKAGES=()
 
@@ -279,7 +356,7 @@ findPackage() {
 					BLACKLISTED=1
 				fi
 			done
-			if [ $MULTILIB -eq 0 ]; then
+			if [ $MULTILIB == "n" ]; then
 				echo $PKG | grep "\-compat32" > /dev/null 2>&1
 				if [ "$?" -eq 0 ]; then
 						continue
@@ -356,12 +433,15 @@ done
 # Remove duplicate entries
 PACKAGES=($(echo ${PACKAGES[@]} | tr " " "\n" | sort -u))
 for i in "${PACKAGES[@]}"; do
-	PKG_DATA[$(packageName $i)]="$(basename $(packageVersion $i) _multilib)"
+	if [ $MULTILIB == "y" ]; then
+		PKG_DATA[$(packageName $i)]="$(packageVersion $i)"
+	else
+		PKG_DATA[$(packageName $i)]="$(basename $(packageVersion $i) _multilib)"
+	fi
 done
 
 
 COUNT_FAIL=0
-COUNT_WARN=0
 REQUIRED_PACKAGES=()
 
 echo ""
@@ -425,7 +505,7 @@ if [ ${#LIBRARIES[@]} -gt 0 ]; then
 		for EACH in "${LIBRARIES[@]}"; do
 			SLACKPKG_OUT=($(/usr/sbin/slackpkg file-search "$EACH"))
 			if [ $(echo "${SLACKPKG_OUT[@]}" | grep -c "No packages contains") -ne 0 ]; then
-				printf "%-30s \e[31m%-40s\e[00m\n" "$EACH" "UNAVAILABLE"
+				printf "%-30s \e[31m%-40s\e[00m\n" "$EACH" "UNKNOWN"
 				continue
 			else
 				for SLACKPKG in "${SLACKPKG_OUT[@]}"; do
@@ -468,7 +548,7 @@ if [ $COUNT_FAIL -gt 0 ]; then
 		if [ "$INSTALL_REQUIRED" == "0" ]; then
 			# Prompt user
 			echo ""
-			echo "Would you like to try install these now using slackpkg? (y|n)"
+			echo "Would you like to install the availabe packages now? (y|n)"
 			read INSTALL_REQUIRED
 		fi
 		if [ "$INSTALL_REQUIRED" == 'y' ]; then
@@ -499,12 +579,8 @@ fi
 
 echo "[Test Completed - ${PACKAGE[longname]}]"
 echo ""
-if [ $COUNT_WARN -gt 0 ]; then 
-	echo "WARNING: $COUNT_WARN packages do not meet the recommended minimum version requirements"
-	echo "   It is highly recommended you upgrade these packages it avoid any potential unstablity"
-fi
 
-if [ $COUNT_WARN -eq 0 ] && [ $COUNT_FAIL -eq 0 ]; then
+if [ $COUNT_FAIL -eq 0 ]; then
 	echo "All requirements for ${PACKAGE[longname]} are met."
 else
 	echo "Your system is missing the following requirements"
@@ -515,6 +591,7 @@ else
 		for i in "${REQUIRED_PACKAGES[@]}"; do
 			echo $i
 		done
+		echo ""
 	fi
 	if [ "${#LIBRARIES[@]}" -gt 0 ]; then
 		echo "[${#LIBRARIES[@]} Unidentified Libraries]"
@@ -522,6 +599,7 @@ else
 		for i in "${LIBRARIES[@]}"; do
 			echo $i
 		done
+		echo ""
 	fi
 fi
 # Clean up
