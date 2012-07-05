@@ -32,8 +32,19 @@
 # system compat32 packages will be listed as requirements instead of
 # the stock x86_64 packages.
 
+## Changes in version 20120706 (xocel)
+# * Added better slack-required read support.
+# * Added the option -c or --current-working-dir allowing
+#   the script to test the cwd instead of a package, useful for
+#   downloaded binaries, or running before makepkg with the -s 
+#   option
+# * Re added the slack-required write feature this can be used to create
+#   the 'install/slack-required' file by using -s or --slack-required in 
+#   conjunction with the -c option of course.
+#   e.g "testpkg -c -s" from the packages root directory.
+
 SCR_NAME=$(basename $0)     # Name of this script
-VERSION=20120704 			# Current version of this script
+VERSION=20120706 			# Current version of this script
 
 PKG_LOG="/var/log/packages" # Package logs
 LDD_MIN="2.13"				# Minimum ldd version supported/tested
@@ -44,7 +55,7 @@ TEMP_PREFIX="/tmp"          # temporary directory prefix
 ## Configure blacklist
 # PKG_BLACKLIST contains blacklisted package names. Add any packages to the 
 # blacklist that you would like ignored.
-PKG_BLACKLIST=( 'util-linux' 'aaa_elflibs') 
+PKG_BLACKLIST=( 'util-linux' 'aaa_elflibs' 'aaa_elflibs-compat32') 
 ##PKG_BLACKLIST=()
 
 ## Tor Browser Bundle fix
@@ -77,6 +88,13 @@ LIB_BLACKLIST=( "${LIB_BLACKLIST[@]}" "libprldap60.so" "libldap60.so" "libldif60
 # 99 = invalid arguments
 # 
 
+## Declare variables
+CWD=$(pwd) 
+LIBRARIES=()
+PACKAGES=()
+declare -A PKG_DATA
+
+
 function usage {
 	# Print usage
 	cat << EOF
@@ -96,6 +114,10 @@ options:    -i, --install-available y|n (Install available required packages,
                                         Auto-determined if not set)
             -v, --version               (Prints $SCR_NAME version)
             -h, --help                  (Prints this message)
+            -c, --current-working-dir   (Test cwd instead of a package)
+            -s, --slack-required        (Write required packages to 
+            	                         'install/slack-required'
+            	                         Must be used with -c option)
 
 EOF
 }
@@ -147,7 +169,9 @@ packageBuild () {
 # Check arguments
 INSTALL_REQUIRED="0"
 MULTILIB="0"
-TEST_PKG=''
+TEST_PKG=''     
+USECWD="0"
+SLACK_REQUIRED="0"
 while [ 0 ]; do
 	if [ "$1" == "-h" -o "$1" == "--help" ]; then
 		usage
@@ -155,6 +179,12 @@ while [ 0 ]; do
 	elif [ "$1" == "--version" -o "$1" == "-v" ]; then
 		echo "$VERSION"
 		exit 0
+	elif [ "$1" == "--current-working-dir" -o "$1" == "-c" ]; then
+		USECWD="1"
+		shift 1
+	elif [ "$1" == "--slack-required" -o "$1" == "-s" ]; then
+		SLACK_REQUIRED="1"
+		shift 1
 	elif [ "$1" == "--multilib" -o "$1" == "-m" ]; then
 		if [ "$2" == "y" ]; then
 			MULTILIB="y"
@@ -182,26 +212,30 @@ while [ 0 ]; do
 		break
 	fi
 done
-
-#VERIFY PACKAGE
-if [ -z $TEST_PKG ]; then
-	usage
-	exit 4
-fi
-
-# Break package up into seperate parts; path, name, ver, arch, build, extension etc
-declare -A PACKAGE
-PACKAGE[path]=$(realpath $TEST_PKG)
-PACKAGE[fullname]=$(basename "${PACKAGE[path]}")
-PACKAGE[extension]=$(echo "${PACKAGE[fullname]}" | rev | cut -f 1 -d . | rev)
-PACKAGE[longname]=$(basename ${PACKAGE[fullname]} ".${PACKAGE[extension]}")
-PACKAGE[shortname]=$(packageName ${PACKAGE[fullname]})
-PACKAGE[version]=$(packageVersion ${PACKAGE[fullname]})
-PACKAGE[arch]=$(packageArch ${PACKAGE[fullname]})
-PACKAGE[build]=$(packageBuild ${PACKAGE[longname]}) 
-
 echo "$SCR_NAME ($VERSION)"
-echo "Testing ${PACKAGE[path]}"
+
+declare -A PACKAGE
+if [ $USECWD -eq 0 ]; then 
+	#VERIFY PACKAGE
+	if [ -z $TEST_PKG ]; then
+		usage
+		exit 4
+	fi
+
+	# Break package up into seperate parts; path, name, ver, arch, build, extension etc
+	PACKAGE[path]=$(realpath $TEST_PKG)
+	PACKAGE[fullname]=$(basename "${PACKAGE[path]}")
+	PACKAGE[extension]=$(echo "${PACKAGE[fullname]}" | rev | cut -f 1 -d . | rev)
+	PACKAGE[longname]=$(basename ${PACKAGE[fullname]} ".${PACKAGE[extension]}")
+	PACKAGE[shortname]=$(packageName ${PACKAGE[fullname]})
+	PACKAGE[version]=$(packageVersion ${PACKAGE[fullname]})
+	PACKAGE[arch]=$(packageArch ${PACKAGE[fullname]})
+	PACKAGE[build]=$(packageBuild ${PACKAGE[longname]}) 
+	echo "Testing ${PACKAGE[path]}"
+else
+	echo "Testing $CWD"
+fi 
+
 
 # If --multilib is not set, determine whether MULTILIB should be set
 if [ $MULTILIB == "0" ]; then 
@@ -232,7 +266,7 @@ if [ $MULTILIB == "y" ]; then
 										 # Will mostly likey need to change this in the future. 
 		echo "WARNING: Multilib core packages are missing"
 		echo "Multilib: FALSE"
-		if ["${PACKAGE[arch]}" == "i486" ] && [ "$ARCH" == "x86_64" ]; then
+		if [ "${PACKAGE[arch]}" == "i486" ] && [ "$ARCH" == "x86_64" ]; then
 			echo "You need to install multilib packages to run 32bit packages on an x86_64"
 			echo "This package will not run on this system, no further information can be" 
 			echo "aquired until you have installed all the multilib packages"
@@ -297,51 +331,45 @@ if [ "$SLACKPKG_EXISTS" == "y" ]; then
 		sleep 5
 	fi
 fi
+if [ $USECWD -eq 0 ]; then
+	# Create temporary directory
+	TEMP_DIR=$(mktemp -d $TEMP_PREFIX/$SCR_NAME.XXXXXX)
 
-# Current working directory
-CWD=$(pwd) 
+	# Extract contents of package to temp_dir
+	# No need to extract whole package if install/slack-required exists.
+	# So attempt that first.
+	CWD=$TEMP_DIR
+	cd $CWD
+	echo "Attempting to extract ${PACKAGE[path]}"
+	tar -xf ${PACKAGE[path]}  > /dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		echo "Unable to extract package: ${PACKAGE[path]}"
+		exit 1
+	else
+		echo "Extracted ${PACKAGE[path]} to $TEMP_DIR"
+	fi
 
-# Create temporary directory
-TEMP_DIR=$(mktemp -d $TEMP_PREFIX/$SCR_NAME.XXXXXX)
+	# Add package to blacklist to prevent it from returning itself as a requirement (if its installed)
+	PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" "${PACKAGE[shortname]}" )
 
-# Extract contents of package to temp_dir
-# No need to extract whole package if install/slack-required exists.
-# So attempt that first.
-CWD=$TEMP_DIR
-cd $CWD
-echo "Attempting to extract ${PACKAGE[path]}"
-tar -xf ${PACKAGE[path]}  > /dev/null 2>&1
-if [ $? -ne 0 ]; then
-	echo "Unable to extract package: ${PACKAGE[path]}"
-	exit 1
-else
-	echo "Extracted ${PACKAGE[path]} to $TEMP_DIR"
-fi
-
-# Add package to blacklist to prevent it from returning itself as a requirement (if its installed)
-PKG_BLACKLIST=( "${PKG_BLACKLIST[@]}" "${PACKAGE[shortname]}" )
-
-
-echo "Determining dependencies, this may take a while.."
-
-LIBRARIES=()
-PACKAGES=()
-
-# Check for slack required for required 3rd party packages 
-if [ -e "$TEMP_DIR/install/slack-required" ]; then
+	# Check for slack required for required 3rd party packages 
+	if [ -e "$CWD/install/slack-required" ]; then
 	# Read packages from slack-required.
-	#REQUIRED_CAT=( $( cat install/slack-required ) )
-	while read LINE; do
-		PKG_FORMAT=($(echo $LINE | tr '-' '\n'))
-		if [ "${#PKG_FORMAT}" -gt 1 ]; then
-			PACKAGES=("${PACKAGES[@]}" "$(packageName $LINE)")
-		else
-			PACKAGES=("${PACKAGES[@]}" "$LINE")
-		fi
-	done < "$TEMP_DIR/install/slack-required"
+		echo "slack-required: yes"
+		while read LINE; do
+			PKG_FORMAT=($(echo $LINE | tr ' ' '\n'))
+			if [ "${#PKG_FORMAT[@]}" -eq 3 ]; then
+				PACKAGES=("${PACKAGES[@]}" "${PKG_FORMAT[0]}-${PKG_FORMAT[2]}")
+			else
+				PACKAGES=("${PACKAGES[@]}" "$LINE")
+			fi
+		done < "$CWD/install/slack-required"
+	else
+		echo "slack-required: no"
+	fi
 fi
 
-findPackage() {
+function findPackage() {
 	PKGS=($(grep $1 $PKG_LOG/*))
 	for LINE in "${PKGS[@]}"; do
 		if [ ! -z $LINE ]; then
@@ -373,9 +401,9 @@ findPackage() {
 	return 1
 }
 
-declare -A PKG_DATA
+echo "Determining dependencies, this may take a while.."
 
-# Will need to determine dependencies using ldd
+# Determine binary dependencies using ldd
 # Attempt that now
 for BIN in $(grep -r -m 1 "^" $CWD | grep "^Binary file" | sed -r 's:^Binary\sfile\s(.*)\smatches:\1:g'); do
 	if [ -e $BIN ]; then    
@@ -440,7 +468,23 @@ for i in "${PACKAGES[@]}"; do
 	fi
 done
 
-
+if [ "$SLACK_REQUIRED" == "1" ] && [ "$USECWD" == "1" ]; then
+ 	if [ ! -e "$CWD/install" ]; then
+ 		mkdir "$CWD/install"
+ 	fi
+ 	if [ -e "$CWD/install/slack-required" ]; then
+ 		rm "$CWD/install/slack-required"
+ 	fi
+ 	for EACH in "${!PKG_DATA[@]}"; do
+ 		echo "$EACH" >> "$CWD/install/slack-required"
+ 	done
+ 	echo "Slack-required written with ${#PKG_DATA[@]} entries"
+ 	echo ""
+ 	cat "$CWD/install/slack-required"
+ 	echo
+ 	echo "All operations complete"
+ 	exit 0
+fi
 COUNT_FAIL=0
 REQUIRED_PACKAGES=()
 
@@ -577,7 +621,11 @@ if [ $COUNT_FAIL -gt 0 ]; then
 
 fi
 
-echo "[Test Completed - ${PACKAGE[longname]}]"
+if [ $USECWD -eq 0 ]; then
+	echo "[Test Completed - ${PACKAGE[longname]}]"
+else
+	echo "[Test Completed - $CWD]"
+fi
 echo ""
 
 if [ $COUNT_FAIL -eq 0 ]; then
