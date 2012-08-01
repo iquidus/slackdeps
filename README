@@ -6,15 +6,42 @@ slackdeps is used to test a .t{gz,bz,lz,xz} package to see if your Slackware sys
     slackdeps -i n /path/to/gimp-2.6.11-x86_64-1.txz
     
 options:    -i, --install-available y|n (Install available required packages,
-                                         prompts user if not set)
+                                        prompts user if not set)
             -m, --multilib y|n          (Sets multilib to y or n,
-                                         Auto-determined if not set)
-            -v, --version               (Prints script version)
+                                        Auto-determined if not set)
+            -v, --version               (Prints $SCR_NAME version)
+            -e, --exclude <package_name>(Blacklists <package_name>)
+            -b, --blacklist  <list_name>(Blacklists all packages in <list_name>)           
             -h, --help                  (Prints this message)
             -c, --current-working-dir   (Test cwd instead of a package)
             -s, --slack-required        (Write required packages to 
             	                         'install/slack-required'
             	                         Must be used with -c option)
+Exclude:
+	Exclude adds a single package to the blacklist. <package_name> is the packages
+	shortname, e.g glibc not glibc-ver-arch-build. It can be used like this:
+		slackdeps -e glibc gimp-2.6.11-x86_64-1.txz
+		slackdeps -c -s -e glibc
+	
+	To exclude multiple packages you can use the option more than once. e.g
+		slackdeps -c -e glibc -e gcc
+	
+	If you are commonly excluding the same packages I recommended making a blacklist
+	instead.
+
+Blacklist:
+	By default there is only one included blacklist, "slack" which contains
+	all packages included in a full slackware install. It can be used like this:
+		slackdeps -c -s -b slack
+	
+	Which would result in a slack-required being created containing only 3rd party 
+	dependencies.
+	
+	You can use your own custom blacklists by placing them in /etc/slackdeps/blacklists
+	The file name of the blacklist is the value to use for <list_name>
+	The blacklist should be formatted, one package per line. With only the short name
+	of the package, e.g gimp not gimp-ver-arch-build. Look at the included slack blacklist
+	for more info or the README.
 
 slackdeps is an experimental script, it is currently in testing, some bugs are to be expected. The current version of this script is 20120706, once more testing has taken place and I am happy with the scripts performance I'll change the version from a date format to a proper versioning system. If you experience any unexpected behaviour or have feedback of any kind please don't hesitate to contact the author/maintaner of this script.
 

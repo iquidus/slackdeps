@@ -24,6 +24,11 @@
 
 # Repo: https://github.com/iquidus/slackdeps
 
+## Changes in version 20120802 (xocel)
+# * Added --exclude and --blacklist options
+# * Created make-package-blacklist.sh
+# * Changed name to slackdeps
+
 ## Changes in version 20120704 (xocel)
 # * Added -m & --multilib options to set multilib to y or n.
 # If unset the value will be automatically determined, set to y if
@@ -44,7 +49,7 @@
 #   e.g "slackdeps -c -s" from the packages root directory.
 
 SCR_NAME=$(basename $0)     # Name of this script
-VERSION=20120706 			# Current version of this script
+VERSION=20120802 			# Current version of this script
 
 PKG_LOG="/var/log/packages" # Package logs
 LDD_MIN="2.13"				# Minimum ldd version supported/tested
