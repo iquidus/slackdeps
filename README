@@ -1,24 +1,24 @@
-Testpkg
+slackdeps
 
-Usage: testpkg [options] <package_filename>
+Usage: slackdeps [options] <package_filename>
 
-Testpkg is used to test a .t{gz,bz,lz,xz} package to see if your Slackware system has the required dependencies. Testpkg may also be able to install any required packages. Any required packages or libraries missing from your system will be listed when the test completes. Testpkg can be used like this:
-    testpkg -i n /path/to/gimp-2.6.11-x86_64-1.txz
+slackdeps is used to test a .t{gz,bz,lz,xz} package to see if your Slackware system has the required dependencies. slackdeps may also be able to install any required packages. Any required packages or libraries missing from your system will be listed when the test completes. slackdeps can be used like this:
+    slackdeps -i n /path/to/gimp-2.6.11-x86_64-1.txz
     
 options:    -i, --install-available y|n (Install available required packages,
                                          prompts user if not set)
             -m, --multilib y|n          (Sets multilib to y or n,
                                          Auto-determined if not set)
-            -v, --version               (Prints $SCR_NAME version)
+            -v, --version               (Prints script version)
             -h, --help                  (Prints this message)
             -c, --current-working-dir   (Test cwd instead of a package)
             -s, --slack-required        (Write required packages to 
             	                         'install/slack-required'
             	                         Must be used with -c option)
 
-Testpkg is an experimental script, it is currently in testing, some bugs are to be expected. The current version of this script is 20120706, once more testing has taken place and I am happy with the scripts performance I'll change the version from a date format to a proper versioning system. If you experience any unexpected behaviour or have feedback of any kind please don't hesitate to contact the author/maintaner of this script.
+slackdeps is an experimental script, it is currently in testing, some bugs are to be expected. The current version of this script is 20120706, once more testing has taken place and I am happy with the scripts performance I'll change the version from a date format to a proper versioning system. If you experience any unexpected behaviour or have feedback of any kind please don't hesitate to contact the author/maintaner of this script.
 
-Note: Testpkg is in no way affiliated with or supported by Slackware Linux, please don't bother the Slackware team with your enquiries. 
+Note: slackdeps is in no way affiliated with or supported by Slackware Linux, please don't bother the Slackware team with your enquiries. 
 
 Requirements: Slackpkg gets used to identify any required libraries (if they belong to offical slackware packages) and also used to retrieve any required packages that are a part of the slackware main tree. To obtain full functionality of this script you must have slackpkg installed on your system. How-ever the script still has basic functionality without slackpkg. 
 
@@ -44,7 +44,7 @@ Changes in version 20120706 (xocel)
  * Re added the slack-required write feature this can be used to create
    the 'install/slack-required' file by using -s or --slack-required in 
    conjunction with the -c option of course.
-   e.g "testpkg -c -s" from the packages root directory.
+   e.g "slackdeps -c -s" from the packages root directory.
 	  
 Luke Williams
 xocel@iquidus.org 
