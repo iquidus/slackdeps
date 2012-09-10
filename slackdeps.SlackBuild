@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Slackware build script for Slackdeps
+# Anyone can freely modify and/or distribute this script without restrictions
+#
+# Written by Luke Williams ( xocel@iquidus.org )
+
+PRGNAM=slackdeps
+VERSION=${VERSION:-20120908} 
+BUILD=${BUILD:-1}
+TAG=${TAG:-_xcl}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+set -eu
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+
+mkdir -p $PKG/usr/sbin
+cat $CWD/slackdeps > $PKG/usr/sbin/slackdeps
+cat $CWD/make-slacklist.sh > $PKG/usr/sbin/make-slacklist.sh
+chmod +x $PKG/usr/sbin/slackdeps
+chmod +x $PKG/usr/sbin/make-slacklist.sh
+
+mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
+
+mkdir -p $PKG/etc/slackdeps
+cat $CWD/slacklist > $PKG/etc/slackdeps/slacklist
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+chown -R root:root $PKG
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-noarch-$BUILD$TAG.${PKGTYPE:-tgz}

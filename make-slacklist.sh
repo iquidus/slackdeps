@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# make-package-blacklist.sh
+# make-slacklist.sh
 
 ## Copyright 2012 Luke Williams, xocel@iquidus.org
 # All rights reserved.
@@ -27,19 +27,19 @@
 # by slackdeps.
 
 SCR_NAME=$(basename $0)     # Name of this script
-VERSION=20120706 			# Current version of this script
-BLACKLISTS="/etc/slackdeps/blacklists" # Blacklists directory
+VERSION=20120908			# Current version of this script
+SLACKLIST="/etc/slackdeps/slacklist" # Slacklist
 
 function usage {
 	# Print usage
 	cat << EOF
 
-Usage: make-package-blacklist.sh [options] <local mirror> <blacklist name>
+Usage: make-slacklist.sh [options] <local mirror>
 
 This script is a part of slackdeps, it is used to generate a blacklist from a local 
 slackware mirror. It writes each package found to a blacklist which can then be used 
 by slackdeps. It can be used like this:
-    make-package-blacklist.sh /path/to/local/slack/mirror blacklist
+    make-slacklist.sh /path/to/local/slack/mirror
     
 options:    -e, --exclude-dir <directory name> (Excludes a package directory)
 
@@ -47,10 +47,10 @@ Exclude Dir:
 	Excludes a single package directory (Packages in this directory will not be 
 	written to the blacklist). <directory name> is the directories name, e.g xap.
 	It can be used like this:
-		make-package-blacklist.sh -e xap /mirror/slackware64-current slack
+		make-slacklist.sh -e xap /mirror/slackware64-current slack
 	
 	To exclude multiple packages you can use the option more than once. e.g
-		make-package-blacklist.sh -e xap -e kde /mirror/slackware64-current slack
+		make-slacklist.sh -e xap -e kde /mirror/slackware64-current slack
 EOF
 }
 
@@ -79,7 +79,7 @@ EXCLUDE=()
 MIRROR=""
 OUTPUT=""
 
-if [ $# -lt 2 ]; then
+if [ $# -lt 1 ]; then
 	usage
 	exit 1
 fi
@@ -95,13 +95,13 @@ while [ 0 ]; do
 		shift 2
 	else
 		MIRROR=$1
-		OUTPUT="$BLACKLISTS/$2"
-		shift 2
+		OUTPUT="$SLACKLIST"
+		shift 1
 		break
 	fi
 done
 
-if [ "$MIRROR" == "" -o "$OUTPUT" == "$BLACKLISTS/" ]; then
+if [ "$MIRROR" == "" ]; then
 	usage
 	exit 1
 fi
