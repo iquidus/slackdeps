@@ -6,7 +6,7 @@
 # Written by Luke Williams ( xocel@iquidus.org )
 
 PRGNAM=slackdeps
-VERSION=${VERSION:-20120908} 
+VERSION=${VERSION:-20121113} 
 BUILD=${BUILD:-1}
 TAG=${TAG:-_xcl}
 
@@ -21,17 +21,17 @@ rm -rf $PKG
 mkdir -p $TMP $PKG $OUTPUT
 
 mkdir -p $PKG/usr/sbin
+mkdir -p $PKG/usr/bin
 cat $CWD/slackdeps > $PKG/usr/sbin/slackdeps
-cat $CWD/make-slacklist.sh > $PKG/usr/sbin/make-slacklist.sh
+cat $CWD/perl.req > $PKG/usr/bin/perl.req
+cat $CWD/perl.prov > $PKG/usr/bin/perl.prov
 chmod +x $PKG/usr/sbin/slackdeps
-chmod +x $PKG/usr/sbin/make-slacklist.sh
+chmod +x $PKG/usr/bin/perl.req
+chmod +x $PKG/usr/bin/perl.prov
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
 cat $CWD/README > $PKG/usr/doc/$PRGNAM-$VERSION/README
-
-mkdir -p $PKG/etc/slackdeps
-cat $CWD/slacklist > $PKG/etc/slackdeps/slacklist
 
 mkdir -p $PKG/install
 cat $CWD/slack-desc > $PKG/install/slack-desc
